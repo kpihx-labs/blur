@@ -2,7 +2,7 @@
 
 check:
 	@shellcheck -x -P scripts scripts/*.sh
-	@./scripts/doctor.sh
+	@./scripts/check-repo.sh
 	@cargo fmt --all --check
 	@cargo clippy --all-targets --all-features -- -D warnings
 	@cargo test --all-targets --all-features

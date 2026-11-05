@@ -48,6 +48,12 @@ runtime root rather than requiring a writable vendor checkout. Linux/Unix host
 flows are the active implementation target today; native Windows parity remains
 an explicit validation item, not a completed claim.
 
+`make check` validates reproducible repository state and never requires owned
+proprietary data. `make doctor` validates this machine's external game,
+toolchain, and generated native runtime. `make setup` builds the pinned
+`vendor/blur-web` checkout; `BLUR_NATIVE_ROOT` is the explicit override for a
+separate research checkout.
+
 Unlock commands currently implement **reversible policy metadata only**.
 Authentic, all, and custom revisions are explicit and can be reverted, but the
 runtime gameplay hook that enforces those policies is not complete. The CLI
