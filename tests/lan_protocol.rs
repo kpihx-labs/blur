@@ -1,0 +1,101 @@
+use std::net::{Ipv4Addr, SocketAddrV4};
+
+use blur::lan::{
+    DiscoveryPolicy, LanPacket, PacketKind, classify_packet, compatibility_hash, decode_packet,
+    encode_packet, filter_compatible, validate_peer,
+};
+
+fn advertisement(compatibility: String) -> LanPacket {
+    LanPacket {
+        magic: "blur-lan".to_owned(),
+        protocol: 1,
+        kind: PacketKind::Advertise,
+        session: "Saturday race".to_owned(),
+        player: "KpihX".to_owned(),
+        compatibility,
+        game_port: 47801,
+        sent_unix: 1,
+    }
+}
+
+fn policy(expected_compatibility: &str) -> DiscoveryPolicy {
+    DiscoveryPolicy {
+        bind_ip: Ipv4Addr::new(192, 168, 1, 10),
+        netmask: Ipv4Addr::new(255, 255, 255, 0),
+        port: 47802,
+        allow_public: false,
+        clock_window: std::time::Duration::from_secs(30),
+        expected_compatibility: expected_compatibility.to_owned(),
+    }
+}
+
+#[test]
+fn lan_packet_round_trips_and_rejects_malformed_or_wrong_protocol_data() {
+    let packet = advertisement(compatibility_hash(&"a".repeat(64), &"b".repeat(64)));
+    let encoded = encode_packet(&packet).unwrap();
+    assert_eq!(decode_packet(&encoded).unwrap(), packet);
+    assert!(decode_packet(b"not-json").is_err());
+
+    let mut wrong_protocol = packet;
+    wrong_protocol.protocol = 99;
+    assert!(encode_packet(&wrong_protocol).is_err());
+}
+
+#[test]
+fn discovery_filter_rejects_incompatible_peers() {
+    let source = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 20), 47802);
+    let expected = compatibility_hash(&"a".repeat(64), &"b".repeat(64));
+    let accepted = classify_packet(advertisement(expected.clone()), source, &expected);
+    let rejected = classify_packet(advertisement("0".repeat(64)), source, &expected);
+    let filtered = filter_compatible(vec![accepted.clone(), rejected.clone()]);
+    assert_eq!(filtered, vec![accepted]);
+    assert!(!rejected.compatible);
+}
+
+#[test]
+fn discovery_validation_accepts_same_subnet_private_sources_only() {
+    let expected = compatibility_hash(&"a".repeat(64), &"b".repeat(64));
+    let packet = advertisement(expected.clone());
+    let source = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 20), 47802);
+    assert!(validate_peer(&packet, source, &policy(&expected), 1).is_ok());
+
+    let wrong_subnet = SocketAddrV4::new(Ipv4Addr::new(192, 168, 2, 20), 47802);
+    assert!(validate_peer(&packet, wrong_subnet, &policy(&expected), 1).is_err());
+
+    let wrong_port = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 20), 53000);
+    assert!(validate_peer(&packet, wrong_port, &policy(&expected), 1).is_err());
+}
+
+#[test]
+fn discovery_validation_allows_public_bind_only_for_same_subnet_sources() {
+    let expected = compatibility_hash(&"a".repeat(64), &"b".repeat(64));
+    let packet = advertisement(expected.clone());
+    let policy = DiscoveryPolicy {
+        bind_ip: Ipv4Addr::new(100, 64, 0, 10),
+        netmask: Ipv4Addr::new(255, 255, 255, 0),
+        port: 47802,
+        allow_public: true,
+        clock_window: std::time::Duration::from_secs(30),
+        expected_compatibility: expected,
+    };
+
+    let same_subnet = SocketAddrV4::new(Ipv4Addr::new(100, 64, 0, 42), 47802);
+    assert!(validate_peer(&packet, same_subnet, &policy, 1).is_ok());
+
+    let off_subnet = SocketAddrV4::new(Ipv4Addr::new(100, 64, 1, 42), 47802);
+    assert!(validate_peer(&packet, off_subnet, &policy, 1).is_err());
+}
+
+#[test]
+fn discovery_validation_rejects_stale_and_future_packets() {
+    let expected = compatibility_hash(&"a".repeat(64), &"b".repeat(64));
+    let source = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 20), 47802);
+
+    let mut stale = advertisement(expected.clone());
+    stale.sent_unix = 1;
+    assert!(validate_peer(&stale, source, &policy(&expected), 100).is_err());
+
+    let mut future = advertisement(expected);
+    future.sent_unix = 200;
+    assert!(validate_peer(&future, source, &policy(&future.compatibility), 100).is_err());
+}
