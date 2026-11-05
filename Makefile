@@ -1,4 +1,4 @@
-.PHONY: check doctor setup-interp setup run
+.PHONY: check doctor push setup-interp setup run
 
 check:
 	@shellcheck -x -P scripts scripts/*.sh
@@ -15,3 +15,6 @@ setup:
 
 run:
 	@./scripts/run-web.sh
+
+push:
+	git push github main

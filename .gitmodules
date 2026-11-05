@@ -1,0 +1,3 @@
+[submodule "vendor/blur-web"]
+	path = vendor/blur-web
+	url = git@github.com:kpihx-labs/blur-web.git
