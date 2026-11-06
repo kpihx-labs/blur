@@ -18,6 +18,23 @@ fn create(home: &TempDir) {
 }
 
 #[test]
+fn historical_profile_without_input_is_migrated_to_authentic() {
+    let home = TempDir::new().unwrap();
+    create(&home);
+    let path = home.path().join("profiles/test/config/input.json");
+    fs::remove_file(&path).unwrap();
+
+    blur(&home)
+        .args(["input", "--profile", "test", "show"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("authentic"));
+
+    let config: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    assert_eq!(config["preset"], "authentic");
+}
+
+#[test]
 fn show_set_reset_import_export_validate_round_trip() {
     let home = TempDir::new().unwrap();
     let transfer = TempDir::new().unwrap();

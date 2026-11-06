@@ -168,12 +168,19 @@ pub fn input_path(profile: &profile::Profile) -> Result<PathBuf> {
 pub fn load(profile: &profile::Profile) -> Result<InputConfig> {
     let path = input_path(profile)?;
     paths::ensure_file_write_path_safe(&path)?;
-    let bytes = read_bounded(&path).with_context(|| {
-        format!(
-            "input configuration is missing or unreadable at {}; run `blur input --profile {} reset --preset authentic`",
-            path.display(), profile.name
-        )
-    })?;
+    match fs::symlink_metadata(&path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let config = preset(InputPresetArg::Authentic);
+            save(profile, &config)?;
+            return Ok(config);
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("could not inspect {}", path.display()));
+        }
+    }
+    let bytes = read_bounded(&path)
+        .with_context(|| format!("input configuration is unreadable at {}", path.display()))?;
     let config: InputConfig = serde_json::from_slice(&bytes)
         .with_context(|| format!("invalid input configuration: {}", path.display()))?;
     validate(&config)?;
