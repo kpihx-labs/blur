@@ -147,12 +147,19 @@ pub fn language_path(profile: &profile::Profile) -> Result<PathBuf> {
 
 pub fn load(profile: &profile::Profile) -> Result<LanguageConfig> {
     let path = language_path(profile)?;
-    let bytes = read_bounded(&path).with_context(|| {
-        format!(
-            "profile language is missing; recreate it or import {}",
-            path.display()
-        )
-    })?;
+    match fs::symlink_metadata(&path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let config = default_config();
+            save(profile, &config)?;
+            return Ok(config);
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("could not inspect {}", path.display()));
+        }
+    }
+    let bytes = read_bounded(&path)
+        .with_context(|| format!("could not load profile language {}", path.display()))?;
     let config: LanguageConfig = serde_json::from_slice(&bytes)
         .with_context(|| format!("invalid language configuration: {}", path.display()))?;
     validate_config(profile, &config)?;

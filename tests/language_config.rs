@@ -18,6 +18,23 @@ fn profile(home: &TempDir) {
 }
 
 #[test]
+fn historical_profile_without_language_is_migrated_to_english() {
+    let home = TempDir::new().unwrap();
+    profile(&home);
+    let path = home.path().join("profiles/driver/config/language.json");
+    fs::remove_file(&path).unwrap();
+
+    blur(&home)
+        .args(["language", "--profile", "driver", "show"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("language: en"));
+
+    let config: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    assert_eq!(config["locale"], "en");
+}
+
+#[test]
 fn bcp47_normalization_is_canonical_and_conservative() {
     assert_eq!(blur::i18n::normalize_locale("FR_fr").unwrap(), "fr-FR");
     assert_eq!(
