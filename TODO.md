@@ -1,6 +1,10 @@
 # TODO
 
 - Fix the post-intro transition and complete one native Ubuntu race.
+- Trace the native title/loading state after the verified host bootstrap key:
+  Intel Arc/WebGL2 sustains 60 FPS at 18 draws with zero skips, but no Lua
+  binding is reached and the spinner remains. The interpreter is too slow to
+  render a frame within the bounded 120-second diagnostic.
 - Add deterministic trace comparison around account/save initialization.
 - Wire the implemented reversible unlock policy metadata to runtime gameplay hooks; isolated profile paths are implemented.
 - Implement direct built-in race selection through native Lua functions.
@@ -22,6 +26,9 @@
   approximation. Record release-gate baselines in a moving menu/race on target
   hardware; WebGPU GPU duration and display-photon latency remain unavailable
   and are not claimed.
+- Heavy setup now defaults to four jobs after a documented 22-worker OOM. Race
+  smokes preflight Puppeteer, use disposable profiles, bound host cleanup, and
+  are executed inside explicit RAM/swap/CPU user scopes.
 - Versioned per-profile language selection, extensible launcher catalogs,
   English/French coverage, strict English fallback, native and Wine propagation,
   localized browser wrapper/HUD, atomic CLI portability, and LAN language
