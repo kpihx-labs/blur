@@ -15,6 +15,7 @@ use crate::{
 
 const NATIVE_EXECUTABLE: &str = "game/extracted/BLUR/Blur.exe";
 const NATIVE_RUNTIME_ARTIFACT: &str = "port/harness/blurrt";
+const NATIVE_CRT_ARTIFACT: &str = "port/vendor/msvcr90.dll";
 const MAX_PLAYER_NAME_BYTES: usize = 15;
 const WINE_OVERLAY_MARKER: &str = ".blur-overlay-ready";
 
@@ -339,16 +340,15 @@ fn verify_native_runtime() -> Result<VerifiedNativeRuntime> {
         "native lift is not built under {}; run the project setup first",
         root.display()
     );
-    let executable = if root.join(NATIVE_EXECUTABLE).is_file() {
-        root.join(NATIVE_EXECUTABLE)
-    } else {
-        paths::project_root()
-            .join("refs/blur-web")
-            .join(NATIVE_EXECUTABLE)
-    };
+    anyhow::ensure!(
+        root.join(NATIVE_CRT_ARTIFACT).is_file(),
+        "native CRT is missing under {}; run the project setup first",
+        root.display()
+    );
+    let executable = root.join(NATIVE_EXECUTABLE);
     anyhow::ensure!(
         executable.is_file(),
-        "native Blur.exe is missing from the selected root and generated refs runtime; run the project setup first"
+        "native Blur.exe is missing from the selected runtime root; run the project setup first"
     );
     let executable_sha256 = sha256_file(&executable)?;
     anyhow::ensure!(
@@ -377,7 +377,7 @@ fn resolve_native_root() -> Result<(PathBuf, NativeRootSource)> {
         return Ok((root, NativeRootSource::EnvOverride));
     }
     let vendor = paths::project_root().join("vendor/blur-web");
-    if vendor.join(NATIVE_RUNTIME_ARTIFACT).is_file() {
+    if native_root_is_complete(&vendor) {
         Ok((vendor, NativeRootSource::VendorSubmodule))
     } else {
         Ok((
@@ -385,6 +385,17 @@ fn resolve_native_root() -> Result<(PathBuf, NativeRootSource)> {
             NativeRootSource::RefsCheckout,
         ))
     }
+}
+
+fn native_root_is_complete(root: &Path) -> bool {
+    [
+        "play.sh",
+        NATIVE_RUNTIME_ARTIFACT,
+        NATIVE_CRT_ARTIFACT,
+        NATIVE_EXECUTABLE,
+    ]
+    .iter()
+    .all(|path| root.join(path).is_file())
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
@@ -559,6 +570,22 @@ fn exit_result(status: ExitStatus) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_root_requires_runtime_crt_launcher_and_game() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path();
+        for path in ["play.sh", NATIVE_RUNTIME_ARTIFACT, NATIVE_EXECUTABLE] {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"fixture").unwrap();
+        }
+        assert!(!native_root_is_complete(root));
+        let crt = root.join(NATIVE_CRT_ARTIFACT);
+        fs::create_dir_all(crt.parent().unwrap()).unwrap();
+        fs::write(crt, b"fixture").unwrap();
+        assert!(native_root_is_complete(root));
+    }
 
     #[test]
     fn deterministic_player_names_are_stable_and_bounded() {
