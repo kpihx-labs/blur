@@ -62,6 +62,10 @@ fn profile_creation_is_isolated_and_does_not_copy_or_mutate_the_game() {
         serde_json::from_slice(&fs::read(root.join("config/input.json")).unwrap()).unwrap();
     assert_eq!(input["schema"], 1);
     assert_eq!(input["preset"], "authentic");
+    let language: Value =
+        serde_json::from_slice(&fs::read(root.join("config/language.json")).unwrap()).unwrap();
+    assert_eq!(language["schema"], 1);
+    assert_eq!(language["locale"], "en");
 }
 
 #[test]

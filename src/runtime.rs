@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     EXPECTED_GAME_SHA256,
     cli::{DoctorArgs, PerfArgs, PlayArgs, RuntimeChoice},
-    input, paths, profile,
+    i18n, input, paths, profile,
 };
 
 const NATIVE_EXECUTABLE: &str = "game/extracted/BLUR/Blur.exe";
@@ -110,6 +110,17 @@ pub fn doctor(args: DoctorArgs) -> Result<()> {
                         failures += 1;
                     }
                 }
+                match i18n::load(&profile) {
+                    Ok(language) => println!(
+                        "ok   language: {} ({})",
+                        language.locale,
+                        i18n::fingerprint(&profile)?
+                    ),
+                    Err(error) => {
+                        eprintln!("FAIL profile language configuration: {error:#}");
+                        failures += 1;
+                    }
+                }
             }
             Err(error) => {
                 eprintln!("FAIL profile '{name}': {error:#}");
@@ -142,6 +153,8 @@ pub(crate) fn native(
     let runtime = verify_native_runtime()?;
     let input_config = input::load(profile)?;
     input::validate_for_runtime(&input_config, RuntimeChoice::Native)?;
+    let locale = i18n::locale(profile)?;
+    let runtime_locale = i18n::runtime_locale(&locale)?;
     let player_name = player_name
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| deterministic_player_name(&profile.name));
@@ -151,10 +164,12 @@ pub(crate) fn native(
         .current_dir(&runtime.root)
         .env("BLUR_SAVEDIR", profile.save_dir()?)
         .env("BLUR_INPUT_CONFIG", input::input_path(profile)?)
+        .env("BLUR_LANG", runtime_locale)
         .env("BLUR_EXE", &runtime.executable)
         .env("BLUR_PLAYER_NAME", &player_name)
         .arg("--port")
         .arg(args.web_port.to_string());
+    command.args(["--lang", runtime_locale]);
     if args.webgl2 {
         command.arg("--webgl2");
     }
@@ -174,6 +189,8 @@ pub fn perf(args: PerfArgs) -> Result<()> {
     let profile = profile::load(&args.profile)?;
     let config = input::load(&profile)?;
     input::validate_for_runtime(&config, RuntimeChoice::Native)?;
+    let locale = i18n::locale(&profile)?;
+    let runtime_locale = i18n::runtime_locale(&locale)?;
     eprintln!(
         "performance instrumentation enabled: blur-web host BLUR_PROF/BLUR_FRAMESTAT/BLUR_OBJSTAT plus browser renderer perf(), renderer identity, optional GPU timer, JS heap, and browser-observed-input-change to received-Present-batch approximation"
     );
@@ -188,6 +205,7 @@ pub fn perf(args: PerfArgs) -> Result<()> {
         .env("BLUR_SAVEDIR", profile.save_dir()?)
         .env("BLUR_PLAYER_NAME", &player_name)
         .env("BLUR_INPUT_CONFIG", input::input_path(&profile)?)
+        .env("BLUR_LANG", runtime_locale)
         .env("BLUR_EXE", &runtime.executable)
         .env("BLUR_PROF", args.sample_frames.to_string())
         .env("BLUR_FRAMESTAT", "1")
@@ -197,6 +215,7 @@ pub fn perf(args: PerfArgs) -> Result<()> {
         .arg(args.web_port.to_string())
         .arg("--hud")
         .args(["--name", &player_name]);
+    command.args(["--lang", runtime_locale]);
     if args.webgl2 {
         command.arg("--webgl2");
     }
@@ -230,9 +249,14 @@ fn wine(profile: &profile::Profile) -> Result<ExitStatus> {
         sha256_file(&overlay_executable)? == EXPECTED_GAME_SHA256,
         "Wine working overlay has an unexpected Blur.exe hash"
     );
+    let locale = i18n::locale(profile)?;
+    let (unix_locale, locale_name, locale_id) = i18n::wine_locale(&locale)?;
+    configure_wine_language(profile, unix_locale, locale_name, locale_id)?;
     Command::new("wine")
         .current_dir(&overlay)
         .env("WINEPREFIX", profile.wine_prefix()?)
+        .env("LANG", unix_locale)
+        .env("LC_ALL", unix_locale)
         .arg(&overlay_executable)
         .status()
         .context("could not launch Wine fallback")
@@ -240,21 +264,65 @@ fn wine(profile: &profile::Profile) -> Result<ExitStatus> {
 
 pub fn native_compatibility_fingerprint(profile: &profile::Profile) -> Result<String> {
     let config = input::load(profile)?;
+    i18n::runtime_locale(&i18n::locale(profile)?)?;
     Ok(native_compatibility_fingerprint_from_verified(
         &verify_native_runtime()?,
         &input::mapping_hash(&config)?,
+        &i18n::fingerprint(profile)?,
     ))
 }
 
 fn native_compatibility_fingerprint_from_verified(
     runtime: &VerifiedNativeRuntime,
     input_hash: &str,
+    language_hash: &str,
 ) -> String {
     crate::lan::compatibility_hash(
         &runtime.executable_sha256,
         &runtime.runtime_sha256,
         input_hash,
+        language_hash,
     )
+}
+
+fn configure_wine_language(
+    profile: &profile::Profile,
+    unix_locale: &str,
+    locale_name: &str,
+    locale_id: &str,
+) -> Result<()> {
+    let prefix = profile.wine_prefix()?;
+    for (name, value) in [("LocaleName", locale_name), ("Locale", locale_id)] {
+        let status = wine_registry_command(&prefix, unix_locale, name, value)
+            .status()
+            .with_context(|| format!("could not configure Wine {name}"))?;
+        anyhow::ensure!(
+            status.success(),
+            "Wine registry update for {name} exited with {status}"
+        );
+    }
+    Ok(())
+}
+
+fn wine_registry_command(prefix: &Path, unix_locale: &str, name: &str, value: &str) -> Command {
+    let mut command = Command::new("wine");
+    command
+        .env("WINEPREFIX", prefix)
+        .env("LANG", unix_locale)
+        .env("LC_ALL", unix_locale)
+        .args([
+            "reg",
+            "add",
+            r"HKCU\Control Panel\International",
+            "/v",
+            name,
+            "/t",
+            "REG_SZ",
+            "/d",
+            value,
+            "/f",
+        ]);
+    command
 }
 
 fn verify_native_runtime() -> Result<VerifiedNativeRuntime> {
@@ -513,16 +581,50 @@ mod tests {
             source: NativeRootSource::EnvOverride,
         };
         assert_eq!(
-            native_compatibility_fingerprint_from_verified(&runtime, &"c".repeat(64)),
+            native_compatibility_fingerprint_from_verified(
+                &runtime,
+                &"c".repeat(64),
+                &"d".repeat(64),
+            ),
             format!(
                 "{:x}",
                 Sha256::digest(format!(
-                    "blur-lan-v1:{}:{}:{}",
+                    "blur-lan-v2:{}:{}:{}:{}",
                     "a".repeat(64),
                     "b".repeat(64),
-                    "c".repeat(64)
+                    "c".repeat(64),
+                    "d".repeat(64)
                 ))
             )
+        );
+    }
+
+    #[test]
+    fn wine_registry_updates_use_literal_arguments_without_a_shell() {
+        let command = wine_registry_command(
+            Path::new("/tmp/prefix;touch-pwned"),
+            "fr_FR.UTF-8",
+            "LocaleName",
+            "fr-FR;touch-pwned",
+        );
+        assert_eq!(command.get_program(), "wine");
+        assert_eq!(
+            command
+                .get_args()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            [
+                "reg",
+                "add",
+                r"HKCU\Control Panel\International",
+                "/v",
+                "LocaleName",
+                "/t",
+                "REG_SZ",
+                "/d",
+                "fr-FR;touch-pwned",
+                "/f",
+            ]
         );
     }
 }

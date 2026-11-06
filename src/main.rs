@@ -12,5 +12,6 @@ fn main() -> Result<()> {
         Command::Lan(args) => blur::lan::run(args),
         Command::Input(args) => blur::input::run(args),
         Command::Perf(args) => blur::runtime::perf(args),
+        Command::Language(args) => blur::i18n::run(args),
     }
 }

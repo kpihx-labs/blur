@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "locale": "en",
+  "messages": {
+    "language.active": "Active launcher language",
+    "language.catalog": "Launcher catalog",
+    "language.coverage": "coverage",
+    "language.fallback": "strict fallback",
+    "language.game_complete": "complete native game localization detected",
+    "language.game_partial": "partial native game localization evidence",
+    "language.game_unknown": "native game localization not proven",
+    "language.saved": "Language saved atomically",
+    "language.valid": "Language configuration is valid"
+  }
+}

@@ -18,3 +18,7 @@
 - Harden input imports and browser delivery against unknown fields, symlinks, oversized files, ambiguous selectors, cross-device conflicts, non-atomic Windows replacement, and silent configured-input fallback.
 - Align the public LAN fingerprint helper with the on-wire game/runtime/input behavior hash and reject non-hex fingerprints.
 - Clarify that browser timing measures received Presents and browser-observed input changes, while hardening C allocation/file handling and adding browser input transformation tests.
+- Add versioned per-profile language configuration with `language list/show/set/validate/import/export`, atomic profile-local catalog imports, strict English fallback, and exact English/French launcher coverage.
+- Propagate English/French through blur-web's consumed Win32 locale APIs and browser URL, localize the wrapper/HUD, and configure Wine through Unix locale environment plus its isolated International registry values.
+- Add conservative native-game catalog evidence detection without modifying proprietary assets or claiming complete packed localization, and include locale plus catalog fingerprint in LAN protocol v2 compatibility.
+- Add Rust language/atomicity/LAN tests, JavaScript fallback/coverage tests, and a C Win32-language-ID test.

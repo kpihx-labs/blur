@@ -20,7 +20,7 @@ if [[ -n "$changes" ]]; then
     while IFS= read -r change; do
         path="${change:3}"
         case "$path" in
-            Makefile|README.md|play.sh|port/harness/play.sh|port/harness/audio.c|port/harness/com.c|port/harness/emu.h|port/harness/net.c|port/harness/rtprof.c|port/harness/test_net_safety.py|port/harness/test_sync.c|port/harness/web/index.html|port/harness/web/input.js|port/harness/web/input.test.js|port/harness/web/renderer.js|port/harness/web/renderer_gpu.js) ;;
+            Makefile|README.md|play.sh|port/harness/blur_locale.h|port/harness/hle.c|port/harness/hle2.c|port/harness/play.sh|port/harness/audio.c|port/harness/com.c|port/harness/emu.h|port/harness/net.c|port/harness/rtprof.c|port/harness/test_locale.c|port/harness/test_net_safety.py|port/harness/test_sync.c|port/harness/web/hcache.js|port/harness/web/index.html|port/harness/web/input.js|port/harness/web/input.test.js|port/harness/web/locale.js|port/harness/web/locale.test.js|port/harness/web/renderer.js|port/harness/web/renderer_gpu.js) ;;
             *) printf '%s has an unexpected local change: %s\n' "$SUBMODULE" "$change" >&2; exit 1;;
         esac
     done <<<"$changes"

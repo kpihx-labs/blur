@@ -29,6 +29,58 @@ pub enum Command {
     Input(InputArgs),
     /// Launch the native runtime with measured host/browser instrumentation enabled.
     Perf(PerfArgs),
+    /// Manage versioned per-profile launcher and game language selection.
+    Language(LanguageArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct LanguageArgs {
+    #[arg(long, default_value = "default", global = true)]
+    pub profile: String,
+    #[command(subcommand)]
+    pub command: LanguageCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LanguageCommand {
+    /// List installed launcher catalogs, coverage, and detected game evidence.
+    List,
+    /// Show the effective language and fallback coverage.
+    Show,
+    /// Select an installed launcher catalog.
+    Set(LanguageSetArgs),
+    /// Validate the active language, a portable config, or a catalog.
+    Validate(LanguageValidateArgs),
+    /// Atomically import a portable config or profile-local catalog.
+    Import(LanguageImportArgs),
+    /// Atomically export the active config or a catalog.
+    Export(LanguageExportArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct LanguageSetArgs {
+    pub locale: String,
+}
+
+#[derive(Debug, Args)]
+pub struct LanguageValidateArgs {
+    pub file: Option<PathBuf>,
+    #[arg(long, requires = "file")]
+    pub catalog: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct LanguageImportArgs {
+    pub file: PathBuf,
+    #[arg(long)]
+    pub catalog: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct LanguageExportArgs {
+    pub file: PathBuf,
+    #[arg(long)]
+    pub catalog: Option<String>,
 }
 
 #[derive(Debug, Args)]

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     atomic_json,
     cli::{ProfileArgs, ProfileCommand, ProfileCreateArgs},
-    input, paths,
+    i18n, input, paths,
 };
 
 const PROFILE_FILE: &str = "profile.json";
@@ -107,6 +107,7 @@ pub fn create(args: ProfileCreateArgs) -> Result<Profile> {
         &profile,
         &input::preset(crate::cli::InputPresetArg::Authentic),
     )?;
+    i18n::save(&profile, &i18n::default_config())?;
     Ok(profile)
 }
 

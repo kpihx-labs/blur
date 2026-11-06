@@ -7,6 +7,9 @@
 - Validate the zero-service compatibility discovery and original LAN transport across physical Ubuntu and Windows PCs.
 - Validate UDP 47801 firewall policy, port conflicts, disconnects, and reconnects; diagnostics never modify firewall state.
 - Validate Windows original-executable and hook parity; the current root Wine fallback is Unix-host-only by design.
+- Verify the owned game's packed PAK localization inventory without modifying
+  it; current filename-only detection intentionally does not claim complete
+  French game localization from opaque packed assets.
 ## Implemented; physical validation remains
 
 - The configurable input schema, CLI, browser/native application, explicit Wine
@@ -19,3 +22,8 @@
   approximation. Record release-gate baselines in a moving menu/race on target
   hardware; WebGPU GPU duration and display-photon latency remain unavailable
   and are not claimed.
+- Versioned per-profile language selection, extensible launcher catalogs,
+  English/French coverage, strict English fallback, native and Wine propagation,
+  localized browser wrapper/HUD, atomic CLI portability, and LAN language
+  fingerprinting are implemented. Validate French text/audio physically in a
+  complete race before calling the proprietary game localization complete.

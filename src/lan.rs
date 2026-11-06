@@ -24,7 +24,8 @@ use crate::{
 };
 
 const MAGIC: &str = "blur-lan";
-const PROTOCOL: u16 = 1;
+const LEGACY_PROTOCOL: u16 = 1;
+const PROTOCOL: u16 = 2;
 const ORIGINAL_LAN_PORT: u16 = 47801;
 const MAX_PACKET: usize = 2048;
 const CLOCK_WINDOW: Duration = Duration::from_secs(30);
@@ -47,6 +48,8 @@ pub struct LanPacket {
     pub session: String,
     pub player: String,
     pub compatibility: String,
+    #[serde(default)]
+    pub language: String,
     pub game_port: u16,
     pub sent_unix: u64,
 }
@@ -74,6 +77,7 @@ pub struct DiscoveryPolicy {
     pub allow_public: bool,
     pub clock_window: Duration,
     pub expected_compatibility: String,
+    pub expected_language: String,
 }
 
 pub fn run(args: LanArgs) -> Result<()> {
@@ -85,8 +89,15 @@ pub fn run(args: LanArgs) -> Result<()> {
     }
 }
 
-pub fn compatibility_hash(game_sha256: &str, runtime_sha256: &str, input_sha256: &str) -> String {
-    let material = format!("blur-lan-v{PROTOCOL}:{game_sha256}:{runtime_sha256}:{input_sha256}");
+pub fn compatibility_hash(
+    game_sha256: &str,
+    runtime_sha256: &str,
+    input_sha256: &str,
+    language_sha256: &str,
+) -> String {
+    let material = format!(
+        "blur-lan-v{PROTOCOL}:{game_sha256}:{runtime_sha256}:{input_sha256}:{language_sha256}"
+    );
     format!("{:x}", Sha256::digest(material.as_bytes()))
 }
 
@@ -114,8 +125,11 @@ pub fn classify_packet(
     packet: LanPacket,
     source: SocketAddrV4,
     expected_compatibility: &str,
+    expected_language: &str,
 ) -> DiscoveredPeer {
-    let compatible = packet.compatibility == expected_compatibility;
+    let compatible = packet.protocol == PROTOCOL
+        && packet.compatibility == expected_compatibility
+        && packet.language == expected_language;
     DiscoveredPeer {
         source,
         packet,
@@ -181,8 +195,9 @@ fn host(args: LanHostArgs) -> Result<()> {
     let interface = select_interface(&args.network)?;
     let socket = bind_socket(&interface, args.network.port)?;
     let compatibility = runtime::native_compatibility_fingerprint(&profile)?;
-    let packet = advertisement(&args.session, &player, &compatibility)?;
-    let policy = policy_for(&interface, &args.network, compatibility);
+    let language = crate::i18n::locale(&profile)?;
+    let packet = advertisement(&args.session, &player, &compatibility, &language)?;
+    let policy = policy_for(&interface, &args.network, compatibility, language);
     let stop = Arc::new(AtomicBool::new(false));
     let handle = advertise(
         socket,
@@ -262,7 +277,13 @@ fn discover(args: &LanDiscoverArgs) -> Result<Vec<DiscoveredPeer>> {
     let interface = select_interface(&args.network)?;
     let socket = bind_socket(&interface, args.network.port)?;
     socket.set_read_timeout(Some(Duration::from_millis(100)))?;
-    let policy = policy_for(&interface, &args.network, expected_compatibility.clone());
+    let language = crate::i18n::locale(&profile)?;
+    let policy = policy_for(
+        &interface,
+        &args.network,
+        expected_compatibility.clone(),
+        language.clone(),
+    );
     let query = LanPacket {
         magic: MAGIC.to_owned(),
         protocol: PROTOCOL,
@@ -270,6 +291,7 @@ fn discover(args: &LanDiscoverArgs) -> Result<Vec<DiscoveredPeer>> {
         session: String::new(),
         player: String::new(),
         compatibility: expected_compatibility.clone(),
+        language,
         game_port: ORIGINAL_LAN_PORT,
         sent_unix: now_unix()?,
     };
@@ -279,7 +301,7 @@ fn discover(args: &LanDiscoverArgs) -> Result<Vec<DiscoveredPeer>> {
     )?;
 
     let deadline = Instant::now() + args.timeout;
-    let mut buffer = [0_u8; MAX_PACKET];
+    let mut buffer = [0_u8; MAX_PACKET + 1];
     let mut peers = BTreeMap::new();
     while Instant::now() < deadline {
         match socket.recv_from(&mut buffer) {
@@ -288,7 +310,12 @@ fn discover(args: &LanDiscoverArgs) -> Result<Vec<DiscoveredPeer>> {
                     && packet.kind == PacketKind::Advertise
                     && validate_peer(&packet, source, &policy, now_unix()?).is_ok()
                 {
-                    let peer = classify_packet(packet, source, &expected_compatibility);
+                    let peer = classify_packet(
+                        packet,
+                        source,
+                        &expected_compatibility,
+                        &policy.expected_language,
+                    );
                     peers.insert(
                         (peer.source.ip().to_owned(), peer.packet.session.clone()),
                         peer,
@@ -316,7 +343,7 @@ fn advertise(
         let destination = SocketAddrV4::new(broadcast, port);
         let mut last_broadcast = Instant::now() - Duration::from_secs(3);
         let mut recent_responses = BTreeMap::new();
-        let mut buffer = [0_u8; MAX_PACKET];
+        let mut buffer = [0_u8; MAX_PACKET + 1];
         while !stop.load(Ordering::Relaxed) {
             if last_broadcast.elapsed() >= Duration::from_secs(2) {
                 let encoded = encode_packet_with_timestamp(&packet, now_unix()?)?;
@@ -327,7 +354,9 @@ fn advertise(
                 Ok((size, SocketAddr::V4(source))) => {
                     if let Ok(query) = decode_packet(&buffer[..size])
                         && query.kind == PacketKind::Query
+                        && query.protocol == PROTOCOL
                         && query.compatibility == policy.expected_compatibility
+                        && query.language == policy.expected_language
                         && validate_peer(&query, source, &policy, now_unix()?).is_ok()
                         && permit_rate_limited_response(
                             &mut recent_responses,
@@ -368,7 +397,12 @@ fn permit_rate_limited_response(
     true
 }
 
-fn advertisement(session: &str, player: &str, compatibility: &str) -> Result<LanPacket> {
+fn advertisement(
+    session: &str,
+    player: &str,
+    compatibility: &str,
+    language: &str,
+) -> Result<LanPacket> {
     let packet = LanPacket {
         magic: MAGIC.to_owned(),
         protocol: PROTOCOL,
@@ -376,6 +410,7 @@ fn advertisement(session: &str, player: &str, compatibility: &str) -> Result<Lan
         session: session.to_owned(),
         player: player.to_owned(),
         compatibility: compatibility.to_owned(),
+        language: language.to_owned(),
         game_port: ORIGINAL_LAN_PORT,
         sent_unix: now_unix()?,
     };
@@ -449,6 +484,7 @@ fn policy_for(
     interface: &Interface,
     args: &LanNetworkArgs,
     expected_compatibility: String,
+    expected_language: String,
 ) -> DiscoveryPolicy {
     DiscoveryPolicy {
         bind_ip: interface.ip,
@@ -457,6 +493,7 @@ fn policy_for(
         allow_public: args.allow_public,
         clock_window: CLOCK_WINDOW,
         expected_compatibility,
+        expected_language,
     }
 }
 
@@ -510,7 +547,10 @@ pub fn validate_peer(
 
 fn validate_packet(packet: &LanPacket) -> Result<()> {
     anyhow::ensure!(packet.magic == MAGIC, "invalid LAN packet magic");
-    anyhow::ensure!(packet.protocol == PROTOCOL, "unsupported LAN protocol");
+    anyhow::ensure!(
+        matches!(packet.protocol, LEGACY_PROTOCOL | PROTOCOL),
+        "unsupported LAN protocol"
+    );
     anyhow::ensure!(
         packet.game_port == ORIGINAL_LAN_PORT,
         "unsupported game LAN port"
@@ -520,9 +560,21 @@ fn validate_packet(packet: &LanPacket) -> Result<()> {
             && packet
                 .compatibility
                 .bytes()
-                .all(|byte| byte.is_ascii_hexdigit()),
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f')),
         "invalid compatibility hash"
     );
+    if packet.protocol == LEGACY_PROTOCOL {
+        anyhow::ensure!(
+            packet.language.is_empty(),
+            "legacy LAN packets must not claim a language"
+        );
+    } else {
+        anyhow::ensure!(
+            crate::i18n::normalize_locale(&packet.language)
+                .is_ok_and(|locale| locale == packet.language),
+            "invalid or non-canonical LAN language"
+        );
+    }
     match packet.kind {
         PacketKind::Query => {
             anyhow::ensure!(
@@ -571,6 +623,7 @@ mod tests {
             session: "Session".to_owned(),
             player: "Player".to_owned(),
             compatibility: "a".repeat(64),
+            language: "en".to_owned(),
             game_port: ORIGINAL_LAN_PORT,
             sent_unix: 1,
         }

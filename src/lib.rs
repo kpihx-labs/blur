@@ -1,6 +1,7 @@
 mod atomic_json;
 
 pub mod cli;
+pub mod i18n;
 pub mod input;
 pub mod lan;
 pub mod paths;

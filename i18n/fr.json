@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "locale": "fr",
+  "messages": {
+    "language.active": "Langue active du lanceur",
+    "language.catalog": "Catalogue du lanceur",
+    "language.coverage": "couverture",
+    "language.fallback": "repli strict",
+    "language.game_complete": "localisation native complète du jeu détectée",
+    "language.game_partial": "indices de localisation native partielle du jeu",
+    "language.game_unknown": "localisation native du jeu non prouvée",
+    "language.saved": "Langue enregistrée atomiquement",
+    "language.valid": "Configuration de langue valide"
+  }
+}
