@@ -9,8 +9,8 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     EXPECTED_GAME_SHA256,
-    cli::{DoctorArgs, PlayArgs, RuntimeChoice},
-    paths, profile,
+    cli::{DoctorArgs, PerfArgs, PlayArgs, RuntimeChoice},
+    input, paths, profile,
 };
 
 const NATIVE_EXECUTABLE: &str = "game/extracted/BLUR/Blur.exe";
@@ -70,8 +70,8 @@ pub fn doctor(args: DoctorArgs) -> Result<()> {
                 runtime.root.display()
             );
             println!(
-                "ok   active native compatibility fingerprint: {}",
-                native_compatibility_fingerprint_from_verified(&runtime)
+                "ok   native runtime artifact fingerprint (input profile not selected): {}",
+                runtime.runtime_sha256
             );
         }
         Err(error) => {
@@ -93,6 +93,23 @@ pub fn doctor(args: DoctorArgs) -> Result<()> {
                     profile.root()?.join("overlay/manifest.json").is_file(),
                     &mut failures,
                 );
+                match input::load(&profile) {
+                    Ok(config) => {
+                        check(
+                            "input schema and conflicts",
+                            input::validate(&config).is_ok(),
+                            &mut failures,
+                        );
+                        println!(
+                            "ok   input behavior fingerprint: {}",
+                            input::mapping_hash(&config)?
+                        );
+                    }
+                    Err(error) => {
+                        eprintln!("FAIL profile input configuration: {error:#}");
+                        failures += 1;
+                    }
+                }
             }
             Err(error) => {
                 eprintln!("FAIL profile '{name}': {error:#}");
@@ -108,6 +125,8 @@ pub fn doctor(args: DoctorArgs) -> Result<()> {
 
 pub fn play(args: PlayArgs) -> Result<()> {
     let profile = profile::load(&args.profile)?;
+    let config = input::load(&profile)?;
+    input::validate_for_runtime(&config, args.runtime)?;
     let status = match args.runtime {
         RuntimeChoice::Native => native(&profile, &args, None)?,
         RuntimeChoice::Wine => wine(&profile)?,
@@ -121,6 +140,8 @@ pub(crate) fn native(
     player_name: Option<&str>,
 ) -> Result<ExitStatus> {
     let runtime = verify_native_runtime()?;
+    let input_config = input::load(profile)?;
+    input::validate_for_runtime(&input_config, RuntimeChoice::Native)?;
     let player_name = player_name
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| deterministic_player_name(&profile.name));
@@ -129,6 +150,8 @@ pub(crate) fn native(
     command
         .current_dir(&runtime.root)
         .env("BLUR_SAVEDIR", profile.save_dir()?)
+        .env("BLUR_INPUT_CONFIG", input::input_path(profile)?)
+        .env("BLUR_EXE", &runtime.executable)
         .env("BLUR_PLAYER_NAME", &player_name)
         .arg("--port")
         .arg(args.web_port.to_string());
@@ -145,6 +168,46 @@ pub(crate) fn native(
     command
         .status()
         .context("could not launch native lifted runtime")
+}
+
+pub fn perf(args: PerfArgs) -> Result<()> {
+    let profile = profile::load(&args.profile)?;
+    let config = input::load(&profile)?;
+    input::validate_for_runtime(&config, RuntimeChoice::Native)?;
+    eprintln!(
+        "performance instrumentation enabled: blur-web host BLUR_PROF/BLUR_FRAMESTAT/BLUR_OBJSTAT plus browser renderer perf(), renderer identity, optional GPU timer, JS heap, and browser-observed-input-change to received-Present-batch approximation"
+    );
+    eprintln!(
+        "scope: these are process/browser observations, not display-photon latency or whole-system GPU utilization; exercise a moving race and terminate normally to collect teardown reports"
+    );
+    let runtime = verify_native_runtime()?;
+    let player_name = deterministic_player_name(&profile.name);
+    let mut command = Command::new(&runtime.launcher);
+    command
+        .current_dir(&runtime.root)
+        .env("BLUR_SAVEDIR", profile.save_dir()?)
+        .env("BLUR_PLAYER_NAME", &player_name)
+        .env("BLUR_INPUT_CONFIG", input::input_path(&profile)?)
+        .env("BLUR_EXE", &runtime.executable)
+        .env("BLUR_PROF", args.sample_frames.to_string())
+        .env("BLUR_FRAMESTAT", "1")
+        .env("BLUR_OBJSTAT", "1")
+        .env("BLUR_PERF_BROWSER", "1")
+        .arg("--port")
+        .arg(args.web_port.to_string())
+        .arg("--hud")
+        .args(["--name", &player_name]);
+    if args.webgl2 {
+        command.arg("--webgl2");
+    }
+    if args.no_open {
+        command.arg("--no-open");
+    }
+    exit_result(
+        command
+            .status()
+            .context("could not launch instrumented native runtime")?,
+    )
 }
 
 fn wine(profile: &profile::Profile) -> Result<ExitStatus> {
@@ -175,18 +238,23 @@ fn wine(profile: &profile::Profile) -> Result<ExitStatus> {
         .context("could not launch Wine fallback")
 }
 
-pub fn native_compatibility_fingerprint() -> Result<String> {
+pub fn native_compatibility_fingerprint(profile: &profile::Profile) -> Result<String> {
+    let config = input::load(profile)?;
     Ok(native_compatibility_fingerprint_from_verified(
         &verify_native_runtime()?,
+        &input::mapping_hash(&config)?,
     ))
 }
 
-fn native_compatibility_fingerprint_from_verified(runtime: &VerifiedNativeRuntime) -> String {
-    let material = format!(
-        "blur-lan-v1:{}:{}",
-        runtime.executable_sha256, runtime.runtime_sha256
-    );
-    format!("{:x}", Sha256::digest(material.as_bytes()))
+fn native_compatibility_fingerprint_from_verified(
+    runtime: &VerifiedNativeRuntime,
+    input_hash: &str,
+) -> String {
+    crate::lan::compatibility_hash(
+        &runtime.executable_sha256,
+        &runtime.runtime_sha256,
+        input_hash,
+    )
 }
 
 fn verify_native_runtime() -> Result<VerifiedNativeRuntime> {
@@ -203,11 +271,16 @@ fn verify_native_runtime() -> Result<VerifiedNativeRuntime> {
         "native lift is not built under {}; run the project setup first",
         root.display()
     );
-    let executable = root.join(NATIVE_EXECUTABLE);
+    let executable = if root.join(NATIVE_EXECUTABLE).is_file() {
+        root.join(NATIVE_EXECUTABLE)
+    } else {
+        paths::project_root()
+            .join("refs/blur-web")
+            .join(NATIVE_EXECUTABLE)
+    };
     anyhow::ensure!(
         executable.is_file(),
-        "native Blur.exe is missing under {}; run the project setup first",
-        root.display()
+        "native Blur.exe is missing from the selected root and generated refs runtime; run the project setup first"
     );
     let executable_sha256 = sha256_file(&executable)?;
     anyhow::ensure!(
@@ -440,10 +513,15 @@ mod tests {
             source: NativeRootSource::EnvOverride,
         };
         assert_eq!(
-            native_compatibility_fingerprint_from_verified(&runtime),
+            native_compatibility_fingerprint_from_verified(&runtime, &"c".repeat(64)),
             format!(
                 "{:x}",
-                Sha256::digest(format!("blur-lan-v1:{}:{}", "a".repeat(64), "b".repeat(64)))
+                Sha256::digest(format!(
+                    "blur-lan-v1:{}:{}:{}",
+                    "a".repeat(64),
+                    "b".repeat(64),
+                    "c".repeat(64)
+                ))
             )
         );
     }

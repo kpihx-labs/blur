@@ -30,6 +30,8 @@ blur play [--profile NAME] [--runtime native|wine]
 blur unlock [--profile NAME] authentic|all|custom [--allow cars,paint]
 blur unlock [--profile NAME] --revert
 blur lan doctor|discover|host|join
+blur input [--profile NAME] show|set|reset|import|export|validate
+blur perf [--profile NAME] [--sample-frames 120]
 ```
 
 Profiles live under the platform-local data directory (or `BLUR_HOME`) with
@@ -59,13 +61,56 @@ Authentic, all, and custom revisions are explicit and can be reverted, but the
 runtime gameplay hook that enforces those policies is not complete. The CLI
 does not claim that content has been unlocked.
 
+### Configurable input
+
+Each profile owns a versioned `config/input.json`. `blur input show` prints the
+whole effective document; `set --path JSON_POINTER --value JSON` performs a
+validated atomic edit; `reset --preset authentic|modern` selects an optional
+preset; and `import`, `export`, and `validate [--runtime native|wine]` provide a
+portable, explicit workflow. The schema represents up to four players, multiple
+keyboard/gamepad devices per player, selectors, digital bindings, axis routing,
+deadzones, saturation, inversion, linear/exponential/cubic steering curves, and
+configurable hotkeys. Duplicate physical sources, duplicate axes, invalid
+ranges, unknown targets, unsafe paths, and unsupported schema versions fail
+loudly before the active file is replaced.
+Gamepad selectors are either `*`, an exact browser Gamepad API `id`, or
+`index:N`; keyboard devices use the browser's single `*` seat. Editing a
+built-in document clears its preset marker, and Wine accepts only the exact
+authentic preset rather than trusting that marker.
+
+The blur-web browser loads the selected profile through a dedicated no-cache
+local endpoint. It applies player-1 keyboard remaps, multiple device selectors,
+standard or explicit gamepad buttons, axes, deadzones and curves, and hotkeys.
+The current lifted host exposes only one keyboard/XInput seat: configurations
+for players 2-4 remain portable but native launch refuses them while enabled.
+Wine receives the original game input directly and cannot safely consume these
+browser transforms; it therefore accepts only the `authentic` transparent
+preset and refuses every non-applicable mapping instead of silently ignoring it.
+The complete mapping hash is included in LAN compatibility fingerprints, so
+behaviorally different peers are not presented as equivalent.
+
+### Performance instrumentation
+
+`blur perf` launches the native runtime with the existing blur-web
+`BLUR_PROF`, `BLUR_FRAMESTAT`, `BLUR_OBJSTAT`, renderer `perf()` rings, and HUD.
+Reports cover host wall/CPU time, host peak RSS where the platform exposes it,
+received-Present interval percentiles, renderer identity, WebGL GPU timer values when the
+extension is available, browser JS heap when Chromium exposes it, guest/object
+teardown, and time from a browser-observed input-state change to receipt of the
+next WebSocket batch containing a Present. The latter includes browser,
+transport, and scheduling delay and is explicitly an approximation: it is not
+display-photon latency. WebGPU currently reports its
+renderer and frame pacing but no GPU duration because that renderer has no
+equivalent timer metric. A valid release run still requires a human-driven
+moving race and normal shutdown; boot-only output is not a performance claim.
+
 ## Same-subnet LAN
 
 `blur lan` adds a small UDP discovery control protocol around the original
 serverless LAN transport. It has no daemon, cloud, account, relay, VPN, or port
 forwarding dependency. By default it selects a private broadcast-capable IPv4
 interface, binds UDP 47802, advertises session/player metadata plus a
-verified game/runtime compatibility fingerprint, and filters incompatible peers.
+verified game/runtime/input-behavior compatibility fingerprint, and filters incompatible peers.
 Use `--bind` and `--port` to select the discovery interface and port. A
 non-private address is refused unless it is explicitly selected with
 `--allow-public`, which only permits that bind choice and does not disable the

@@ -32,13 +32,14 @@ const RESPONSE_RATE_LIMIT_WINDOW: Duration = Duration::from_millis(500);
 const MAX_RATE_LIMIT_SOURCES: usize = 256;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum PacketKind {
     Query,
     Advertise,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LanPacket {
     pub magic: String,
     pub protocol: u16,
@@ -84,8 +85,8 @@ pub fn run(args: LanArgs) -> Result<()> {
     }
 }
 
-pub fn compatibility_hash(game_sha256: &str, runtime_sha256: &str) -> String {
-    let material = format!("blur-lan-v{PROTOCOL}:{game_sha256}:{runtime_sha256}");
+pub fn compatibility_hash(game_sha256: &str, runtime_sha256: &str, input_sha256: &str) -> String {
+    let material = format!("blur-lan-v{PROTOCOL}:{game_sha256}:{runtime_sha256}:{input_sha256}");
     format!("{:x}", Sha256::digest(material.as_bytes()))
 }
 
@@ -179,12 +180,9 @@ fn host(args: LanHostArgs) -> Result<()> {
     validate_label("player", &player, 32)?;
     let interface = select_interface(&args.network)?;
     let socket = bind_socket(&interface, args.network.port)?;
-    let packet = advertisement(&args.session, &player)?;
-    let policy = policy_for(
-        &interface,
-        &args.network,
-        runtime::native_compatibility_fingerprint()?,
-    );
+    let compatibility = runtime::native_compatibility_fingerprint(&profile)?;
+    let packet = advertisement(&args.session, &player, &compatibility)?;
+    let policy = policy_for(&interface, &args.network, compatibility);
     let stop = Arc::new(AtomicBool::new(false));
     let handle = advertise(
         socket,
@@ -219,6 +217,7 @@ fn host(args: LanHostArgs) -> Result<()> {
 }
 
 fn join(args: LanJoinArgs) -> Result<()> {
+    let profile_name = args.discovery.profile.clone();
     let peers = discover(&args.discovery)?;
     let mut compatible = filter_compatible(peers)
         .into_iter()
@@ -248,7 +247,7 @@ fn join(args: LanJoinArgs) -> Result<()> {
         "the original game LAN UI remains authoritative over UDP {ORIGINAL_LAN_PORT}; discovery only preflights compatibility"
     );
     crate::runtime::play(PlayArgs {
-        profile: args.profile,
+        profile: profile_name,
         runtime: RuntimeChoice::Native,
         web_port: args.web_port,
         webgl2: false,
@@ -258,7 +257,8 @@ fn join(args: LanJoinArgs) -> Result<()> {
 }
 
 fn discover(args: &LanDiscoverArgs) -> Result<Vec<DiscoveredPeer>> {
-    let expected_compatibility = runtime::native_compatibility_fingerprint()?;
+    let profile = profile::load(&args.profile)?;
+    let expected_compatibility = runtime::native_compatibility_fingerprint(&profile)?;
     let interface = select_interface(&args.network)?;
     let socket = bind_socket(&interface, args.network.port)?;
     socket.set_read_timeout(Some(Duration::from_millis(100)))?;
@@ -368,15 +368,14 @@ fn permit_rate_limited_response(
     true
 }
 
-fn advertisement(session: &str, player: &str) -> Result<LanPacket> {
-    let compatibility = runtime::native_compatibility_fingerprint()?;
+fn advertisement(session: &str, player: &str, compatibility: &str) -> Result<LanPacket> {
     let packet = LanPacket {
         magic: MAGIC.to_owned(),
         protocol: PROTOCOL,
         kind: PacketKind::Advertise,
         session: session.to_owned(),
         player: player.to_owned(),
-        compatibility,
+        compatibility: compatibility.to_owned(),
         game_port: ORIGINAL_LAN_PORT,
         sent_unix: now_unix()?,
     };
@@ -517,7 +516,11 @@ fn validate_packet(packet: &LanPacket) -> Result<()> {
         "unsupported game LAN port"
     );
     anyhow::ensure!(
-        packet.compatibility.len() == 64,
+        packet.compatibility.len() == 64
+            && packet
+                .compatibility
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit()),
         "invalid compatibility hash"
     );
     match packet.kind {

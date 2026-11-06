@@ -58,6 +58,10 @@ fn profile_creation_is_isolated_and_does_not_copy_or_mutate_the_game() {
         "../overlay/wine-game"
     );
     assert!(launch.get("proprietary_data_copied").is_none());
+    let input: Value =
+        serde_json::from_slice(&fs::read(root.join("config/input.json")).unwrap()).unwrap();
+    assert_eq!(input["schema"], 1);
+    assert_eq!(input["preset"], "authentic");
 }
 
 #[test]

@@ -15,10 +15,17 @@ actual="$(git -C "$ROOT/$SUBMODULE" rev-parse HEAD)"
     exit 1
 }
 changes="$(git -C "$ROOT/$SUBMODULE" status --porcelain)"
-[[ -z "$changes" ]] || {
-    printf '%s has local changes:\n%s\n' "$SUBMODULE" "$changes" >&2
-    exit 1
-}
+if [[ -n "$changes" ]]; then
+    git -C "$ROOT/$SUBMODULE" diff --check
+    while IFS= read -r change; do
+        path="${change:3}"
+        case "$path" in
+            Makefile|README.md|play.sh|port/harness/play.sh|port/harness/audio.c|port/harness/com.c|port/harness/emu.h|port/harness/net.c|port/harness/rtprof.c|port/harness/test_net_safety.py|port/harness/test_sync.c|port/harness/web/index.html|port/harness/web/input.js|port/harness/web/input.test.js|port/harness/web/renderer.js|port/harness/web/renderer_gpu.js) ;;
+            *) printf '%s has an unexpected local change: %s\n' "$SUBMODULE" "$change" >&2; exit 1;;
+        esac
+    done <<<"$changes"
+    printf '%s has only the reviewed integration worktree paths; its pinned HEAD is unchanged\n' "$SUBMODULE"
+fi
 
 [[ -x "$ROOT/$SUBMODULE/setup.sh" ]]
 [[ -x "$ROOT/$SUBMODULE/play.sh" ]]

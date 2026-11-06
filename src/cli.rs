@@ -25,6 +25,84 @@ pub enum Command {
     Unlock(UnlockArgs),
     /// Diagnose and use zero-service same-subnet LAN discovery.
     Lan(LanArgs),
+    /// Inspect and edit versioned per-profile input mappings.
+    Input(InputArgs),
+    /// Launch the native runtime with measured host/browser instrumentation enabled.
+    Perf(PerfArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct InputArgs {
+    #[arg(long, default_value = "default", global = true)]
+    pub profile: String,
+    #[command(subcommand)]
+    pub command: InputCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum InputCommand {
+    /// Print the complete effective JSON configuration.
+    Show,
+    /// Replace one value using an RFC 6901 JSON pointer and a JSON value.
+    Set(InputSetArgs),
+    /// Replace the configuration with an optional built-in preset.
+    Reset(InputResetArgs),
+    /// Import and validate a complete JSON configuration.
+    Import(InputFileArgs),
+    /// Export the complete JSON configuration without modifying it.
+    Export(InputFileArgs),
+    /// Validate schema, ranges, conflicts, and runtime applicability.
+    Validate(InputValidateArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct InputSetArgs {
+    /// RFC 6901 pointer, for example /players/0/devices/0/axes/0/deadzone.
+    #[arg(long)]
+    pub path: String,
+    /// JSON value, for example 0.18, true, or "KeyW".
+    #[arg(long, allow_hyphen_values = true)]
+    pub value: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+pub enum InputPresetArg {
+    Authentic,
+    #[default]
+    Modern,
+}
+
+#[derive(Debug, Args)]
+pub struct InputResetArgs {
+    #[arg(long, value_enum, default_value_t)]
+    pub preset: InputPresetArg,
+}
+
+#[derive(Debug, Args)]
+pub struct InputFileArgs {
+    pub file: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct InputValidateArgs {
+    /// Also require that every enabled mapping is applicable to this runtime.
+    #[arg(long, value_enum)]
+    pub runtime: Option<RuntimeChoice>,
+}
+
+#[derive(Debug, Args)]
+pub struct PerfArgs {
+    #[arg(long, default_value = "default")]
+    pub profile: String,
+    /// Number of game Presents in each existing blur-web host report window.
+    #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u32).range(10..=4096))]
+    pub sample_frames: u32,
+    #[arg(long, default_value_t = 8765)]
+    pub web_port: u16,
+    #[arg(long)]
+    pub webgl2: bool,
+    #[arg(long)]
+    pub no_open: bool,
 }
 
 #[derive(Debug, Args)]
@@ -142,6 +220,9 @@ pub struct LanDiscoverArgs {
     /// Show incompatible advertisements instead of filtering them out.
     #[arg(long)]
     pub show_incompatible: bool,
+    /// Profile whose behavioral input mapping participates in compatibility.
+    #[arg(long, default_value = "default")]
+    pub profile: String,
 }
 
 #[derive(Debug, Args)]
@@ -164,8 +245,6 @@ pub struct LanHostArgs {
 pub struct LanJoinArgs {
     #[command(flatten)]
     pub discovery: LanDiscoverArgs,
-    #[arg(long, default_value = "default")]
-    pub profile: String,
     /// Exact session name. If omitted, exactly one compatible session must be visible.
     #[arg(long)]
     pub session: Option<String>,

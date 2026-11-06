@@ -10,5 +10,7 @@ fn main() -> Result<()> {
         Command::Profile(args) => blur::profile::run(args),
         Command::Unlock(args) => blur::unlock::run(args),
         Command::Lan(args) => blur::lan::run(args),
+        Command::Input(args) => blur::input::run(args),
+        Command::Perf(args) => blur::runtime::perf(args),
     }
 }

@@ -16,7 +16,9 @@ fn top_level_help_exposes_the_product_commands() {
         .stdout(predicate::str::contains("play"))
         .stdout(predicate::str::contains("profile"))
         .stdout(predicate::str::contains("unlock"))
-        .stdout(predicate::str::contains("lan"));
+        .stdout(predicate::str::contains("lan"))
+        .stdout(predicate::str::contains("input"))
+        .stdout(predicate::str::contains("perf"));
 }
 
 #[test]
@@ -27,6 +29,8 @@ fn nested_help_is_available_without_local_game_data() {
         &["lan", "discover", "--help"][..],
         &["lan", "host", "--help"][..],
         &["lan", "join", "--help"][..],
+        &["input", "set", "--help"][..],
+        &["perf", "--help"][..],
     ] {
         blur().args(arguments).assert().success();
     }

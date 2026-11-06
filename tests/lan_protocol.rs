@@ -31,7 +31,11 @@ fn policy(expected_compatibility: &str) -> DiscoveryPolicy {
 
 #[test]
 fn lan_packet_round_trips_and_rejects_malformed_or_wrong_protocol_data() {
-    let packet = advertisement(compatibility_hash(&"a".repeat(64), &"b".repeat(64)));
+    let packet = advertisement(compatibility_hash(
+        &"a".repeat(64),
+        &"b".repeat(64),
+        &"c".repeat(64),
+    ));
     let encoded = encode_packet(&packet).unwrap();
     assert_eq!(decode_packet(&encoded).unwrap(), packet);
     assert!(decode_packet(b"not-json").is_err());
@@ -39,12 +43,15 @@ fn lan_packet_round_trips_and_rejects_malformed_or_wrong_protocol_data() {
     let mut wrong_protocol = packet;
     wrong_protocol.protocol = 99;
     assert!(encode_packet(&wrong_protocol).is_err());
+
+    let non_hex = advertisement("z".repeat(64));
+    assert!(encode_packet(&non_hex).is_err());
 }
 
 #[test]
 fn discovery_filter_rejects_incompatible_peers() {
     let source = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 20), 47802);
-    let expected = compatibility_hash(&"a".repeat(64), &"b".repeat(64));
+    let expected = compatibility_hash(&"a".repeat(64), &"b".repeat(64), &"c".repeat(64));
     let accepted = classify_packet(advertisement(expected.clone()), source, &expected);
     let rejected = classify_packet(advertisement("0".repeat(64)), source, &expected);
     let filtered = filter_compatible(vec![accepted.clone(), rejected.clone()]);
@@ -54,7 +61,7 @@ fn discovery_filter_rejects_incompatible_peers() {
 
 #[test]
 fn discovery_validation_accepts_same_subnet_private_sources_only() {
-    let expected = compatibility_hash(&"a".repeat(64), &"b".repeat(64));
+    let expected = compatibility_hash(&"a".repeat(64), &"b".repeat(64), &"c".repeat(64));
     let packet = advertisement(expected.clone());
     let source = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 20), 47802);
     assert!(validate_peer(&packet, source, &policy(&expected), 1).is_ok());
@@ -68,7 +75,7 @@ fn discovery_validation_accepts_same_subnet_private_sources_only() {
 
 #[test]
 fn discovery_validation_allows_public_bind_only_for_same_subnet_sources() {
-    let expected = compatibility_hash(&"a".repeat(64), &"b".repeat(64));
+    let expected = compatibility_hash(&"a".repeat(64), &"b".repeat(64), &"c".repeat(64));
     let packet = advertisement(expected.clone());
     let policy = DiscoveryPolicy {
         bind_ip: Ipv4Addr::new(100, 64, 0, 10),
@@ -88,7 +95,7 @@ fn discovery_validation_allows_public_bind_only_for_same_subnet_sources() {
 
 #[test]
 fn discovery_validation_rejects_stale_and_future_packets() {
-    let expected = compatibility_hash(&"a".repeat(64), &"b".repeat(64));
+    let expected = compatibility_hash(&"a".repeat(64), &"b".repeat(64), &"c".repeat(64));
     let source = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 20), 47802);
 
     let mut stale = advertisement(expected.clone());

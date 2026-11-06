@@ -33,8 +33,13 @@ pub fn ensure_path_components_safe(path: &Path) -> Result<()> {
     let mut current = PathBuf::new();
     for component in absolute.components() {
         current.push(component);
-        if current.exists() {
-            ensure_not_symlink(&current)?;
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) => ensure_not_symlink(&current, &metadata)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("could not inspect {}", current.display()));
+            }
         }
     }
     Ok(())
@@ -45,8 +50,12 @@ pub fn ensure_file_write_path_safe(path: &Path) -> Result<()> {
         .parent()
         .context("path has no parent directory for safe write")?;
     ensure_path_components_safe(parent)?;
-    if path.exists() {
-        ensure_not_symlink(path)?;
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => ensure_not_symlink(path, &metadata)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("could not inspect {}", path.display()));
+        }
     }
     Ok(())
 }
@@ -72,9 +81,7 @@ fn absolute(path: PathBuf) -> Result<PathBuf> {
     }
 }
 
-fn ensure_not_symlink(path: &Path) -> Result<()> {
-    let metadata = fs::symlink_metadata(path)
-        .with_context(|| format!("could not inspect {}", path.display()))?;
+fn ensure_not_symlink(path: &Path, metadata: &fs::Metadata) -> Result<()> {
     anyhow::ensure!(
         !metadata.file_type().is_symlink(),
         "refusing symlink/reparse path component: {}",

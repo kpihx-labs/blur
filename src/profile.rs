@@ -8,8 +8,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    atomic_json,
     cli::{ProfileArgs, ProfileCommand, ProfileCreateArgs},
-    paths,
+    input, paths,
 };
 
 const PROFILE_FILE: &str = "profile.json";
@@ -102,6 +103,10 @@ pub fn create(args: ProfileCreateArgs) -> Result<Profile> {
             "entries": []
         }),
     )?;
+    input::save(
+        &profile,
+        &input::preset(crate::cli::InputPresetArg::Authentic),
+    )?;
     Ok(profile)
 }
 
@@ -151,30 +156,7 @@ fn list() -> Result<()> {
 }
 
 pub(crate) fn write_json(path: impl AsRef<Path>, value: &impl Serialize) -> Result<()> {
-    let path = path.as_ref();
-    paths::ensure_file_write_path_safe(path)?;
-    let bytes = serde_json::to_vec_pretty(value)?;
-    let temporary = path.with_extension("json.tmp");
-    let backup = path.with_extension("json.bak");
-    fs::write(&temporary, bytes)
-        .with_context(|| format!("could not write {}", temporary.display()))?;
-    if path.exists() {
-        if backup.exists() {
-            fs::remove_file(&backup)
-                .with_context(|| format!("could not remove {}", backup.display()))?;
-        }
-        fs::rename(path, &backup).with_context(|| format!("could not stage {}", path.display()))?;
-        if let Err(error) = fs::rename(&temporary, path) {
-            let _ = fs::rename(&backup, path);
-            return Err(error).with_context(|| format!("could not replace {}", path.display()));
-        }
-        fs::remove_file(&backup)
-            .with_context(|| format!("could not finalize {}", path.display()))?;
-        Ok(())
-    } else {
-        fs::rename(&temporary, path)
-            .with_context(|| format!("could not replace {}", path.display()))
-    }
+    atomic_json::write(path, value)
 }
 
 fn canonical_game_dir(path: &Path) -> Result<PathBuf> {
